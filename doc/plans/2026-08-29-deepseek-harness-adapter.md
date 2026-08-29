@@ -134,7 +134,7 @@ Prefer a follow-up (not blocking V1) that replaces these lists with `ServerAdapt
 
 ## 5. Locked decisions
 
-1. **Primary execute path** is a Node JSON-RPC client talking to a `dsh-jsonrpc-agent` (or `node` + `@deepseek-ai/dsh-sdk-jsonrpc-server` composition) subprocess. Prefer depending on published `@deepseek-ai/dsh-sdk-client` + `@deepseek-ai/dsh-sdk-protocol` if their license and publish cadence are acceptable; otherwise copy only the wire types and write a thin NDJSON client in the adapter (do not import the DeepSeek monorepo).
+1. **Primary execute path** is a Paperclip-owned NDJSON JSON-RPC client talking to a `dsh-jsonrpc-agent` subprocess. Published `@deepseek-ai/dsh-sdk-client` / `@deepseek-ai/dsh-sdk-protocol` (`0.1.1-rc.2`) are independently installable on npm (peers rewritten off `workspace:^`), but they pull `dsh-llm` / `dsh-session` / `dsh-subagent` / `cordis` types into Paperclip. Own the wire client for isolation. Match `HarnessSession.run`: subscribe → `session/prompt` → wait for `agent/inbox/spliced` with `inserted[].id === messageId` → collect until `session.status === idle`. Do not copy the Phase 0 spike’s `waitForIdle`.
 2. **Paperclip-owned Cordis composition** ships inside the adapter (`src/server/paperclip.cordis.yml`). It must include: JSON-RPC server, DeepSeek official provider, coding tools (bash + filesystem edit, not the `minimal` two-tool preset), skill registry + filesystem provider, unattended approval policy, JSONL persistence, compaction. It must not include web/TUI/stdout logger.
 3. **Session identity** is a Paperclip-generated id stored in `agentTaskSessions.session_params_json`. The adapter always sends that id on `session/prompt`. `dsh` lazily creates the agent+session pair.
 4. **Session root** is Paperclip-managed (`$PAPERCLIP_HOME/adapter-state/<company>/<agent>/deepseek/sessions` or the execution-target equivalent), passed as `DSH_SESSION_ROOT`. Do not write into the operator’s interactive `~/.dsh` session store by default.
@@ -444,10 +444,10 @@ PR template must include Thinking Path, What Changed, Verification, Risks, Model
 Closed from `/Users/mikestaub/code/codecrafters/ai-coding-tools/deepseek-harness` at adapter-plan time. dsh version in-tree: `0.1.1-rc.2`.
 
 1. **Default model id:** `deepseek-v4-flash`. Confirmed in `python/sdk/README.md`, `packages/web/web-search-deepseek/src/provider.ts` (`DEEPSEEK_DEFAULT_MODEL`), and workflow tests. Pro / reasoner ids such as `deepseek-v4-pro` exist; cheap profile stays on flash.
-2. **Published SDK vs owned client:** `@deepseek-ai/dsh-sdk-client` and `@deepseek-ai/dsh-sdk-protocol` exist (`0.1.1-rc.2`) but declare `workspace:^` peerDependencies on `@deepseek-ai/dsh-llm`, `@deepseek-ai/dsh-session`, `@deepseek-ai/dsh-subagent`, and `@deepseek-ai/cordis`. They are **not** independently usable from Paperclip’s workspace. **Decision: own thin NDJSON JSON-RPC client** (`src/server/jsonrpc-client.ts`). Do not depend on `@deepseek-ai/dsh-*`.
+2. **Published SDK vs owned client:** In-tree package.json uses `workspace:^` peers; published npm `0.1.1-rc.2` rewrites those to registry ranges, so the SDK **is** independently installable. **Decision remains: own thin NDJSON client** so Paperclip does not take a type dependency on `dsh-llm` / `dsh-session` / `cordis`. Isolation, not “unpublished peers.”
 3. **TokenUsage → UsageSummary:** `packages/llm/llm/src/types.ts` — `{ inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, reasoningTokens? }`. Counts are disjoint: `inputTokens` is uncached input only. Map `cacheReadTokens` → `cachedInputTokens`. Ignore `cacheWriteTokens` / `reasoningTokens` in V1 totals (they are not Paperclip `UsageSummary` fields).
 4. **Unattended policy:** mount `@deepseek-ai/dsh-sandbox-policy` with `mode: danger-full-access` (default is fail-safe `read-only`). The shipped `examples/jsonrpc-agent/cordis.yml` does not mount this plugin; Paperclip’s composition must, so heartbeats do not block on file/bash approval. There is no separate Claude-style `--dangerously-skip-permissions` flag.
-5. **Runtime install:** the JSON-RPC bin is `dsh-jsonrpc-agent` from `@deepseek-ai/dsh-sdk-jsonrpc-demo` (`packages/examples/jsonrpc-demo`, bin `dsh-jsonrpc-agent`). Product CLI is `@deepseek-ai/dsh` (`dsh`). Python production carrier is `deepseek-harness-runtime-bin` (`dsh-jsonrpc-agent`). Sandbox `installCommand` (best effort): `npm install -g @deepseek-ai/dsh-sdk-jsonrpc-demo@0.1.1-rc.2`. Prefer detecting an already-installed `dsh-jsonrpc-agent` or repo-local bin. Always pass `DSH_CORDIS_CONFIG` — the runtime exits without it.
+5. **Runtime install:** `dsh-jsonrpc-agent` is the JSON-RPC bin (`@deepseek-ai/dsh-sdk-jsonrpc-demo`). It **does not** ship the plugin tree; it boots `$DSH_CORDIS_CONFIG` / argv and resolves bare plugins from the **configuration project**. `npm install -g @deepseek-ai/dsh-sdk-jsonrpc-demo` alone is not a working runtime. Operators need a DeepSeek Harness install (source checkout, `@deepseek-ai/dsh`, or the Python `deepseek-harness-runtime-bin` closed exe). Paperclip ships `paperclip.cordis.yml` and sets `NODE_PATH` to `harnessRoot/node_modules` when `adapterConfig.harnessRoot` is set. Always pass `DSH_CORDIS_CONFIG`. `getRuntimeCommandSpec.installCommand` stays `null` unless a closed runtime bin is on PATH.
 
 **SDK client decision recorded:** own protocol types + NDJSON client. Pin compatibility notes to dsh `0.1.1-rc.2` wire: `initialize`, `session/prompt`, `shutdown` + notifications `session.event`, `session.status`, `subagent.started`, `subagent.finished`. `serverInfo.name` is `deepseek-harness-sdk-runtime`.
 
@@ -456,3 +456,13 @@ Closed from `/Users/mikestaub/code/codecrafters/ai-coding-tools/deepseek-harness
 ### Watchdog
 
 `scripts/monitor-deepseek-adapter-session.sh` checks git/file/heartbeat freshness. A 20-minute agent loop ticks `AGENT_LOOP_TICK_deepseek_adapter`. Heartbeat file: `.ai/deepseek-adapter-session/heartbeat.json`.
+
+## 19. Phase 1 results (2026-08-29)
+
+Shipped `@paperclipai/adapter-deepseek-harness` and registered `deepseek_local` as a built-in.
+
+- Owned NDJSON client + `subscribe` **before** `session/prompt`, then inbox receipt (`agent/inbox/spliced` + `inserted[].id === messageId`) then `session.status === idle`.
+- `installCommand` is `null`. README documents the plugin+cordis+`harnessRoot` closure.
+- Host lists updated for hire/wake/session resume (not remote-managed; that is Phase 3).
+- Env test fails closed without `DEEPSEEK_API_KEY`. Hello probe is local-only.
+- Tests use a protocol-accurate mock runtime. Live `DEEPSEEK_API_KEY` heartbeat was not run.

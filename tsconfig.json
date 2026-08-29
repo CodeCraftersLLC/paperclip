@@ -10,6 +10,7 @@
     { "path": "./packages/adapters/claude-local" },
     { "path": "./packages/adapters/codex-local" },
     { "path": "./packages/adapters/cursor-local" },
+    { "path": "./packages/adapters/deepseek-harness" },
     { "path": "./packages/adapters/hermes-gateway" },
     { "path": "./packages/adapters/hermes" },
     { "path": "./packages/adapters/droid-local" },

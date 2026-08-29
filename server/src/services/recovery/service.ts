@@ -110,6 +110,7 @@ const SESSIONED_LOCAL_ADAPTERS = new Set([
   "claude_local",
   "codex_local",
   "cursor",
+  "deepseek_local",
   "gemini_local",
   "hermes_local",
   "kimi_local",
