@@ -16,6 +16,17 @@ describe("sessionCodec", () => {
     });
   });
 
+  it("preserves remoteExecution so SSH/sandbox resume can match the target", () => {
+    const raw = {
+      sessionId: "s1",
+      cwd: "/remote/workspace",
+      sessionRoot: "/remote/sessions",
+      remoteExecution: { transport: "sandbox", providerKey: "fake", remoteCwd: "/remote/workspace" },
+    };
+    expect(sessionCodec.deserialize(raw)).toEqual(raw);
+    expect(sessionCodec.serialize(raw)).toEqual(raw);
+  });
+
   it("returns null without a session id", () => {
     expect(sessionCodec.deserialize({ cwd: "/tmp" })).toBeNull();
   });

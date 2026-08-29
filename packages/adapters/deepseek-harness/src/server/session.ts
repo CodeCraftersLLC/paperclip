@@ -26,10 +26,17 @@ export const sessionCodec: AdapterSessionCodec = {
     const sessionRoot =
       readNonEmptyString(record.sessionRoot) ??
       readNonEmptyString(record.session_root);
+    const remoteExecution =
+      typeof record.remoteExecution === "object" &&
+      record.remoteExecution !== null &&
+      !Array.isArray(record.remoteExecution)
+        ? record.remoteExecution
+        : null;
     return {
       sessionId,
       ...(cwd ? { cwd } : {}),
       ...(sessionRoot ? { sessionRoot } : {}),
+      ...(remoteExecution ? { remoteExecution } : {}),
     };
   },
   serialize(params: Record<string, unknown> | null) {

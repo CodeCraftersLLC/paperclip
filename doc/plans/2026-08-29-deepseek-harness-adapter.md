@@ -1,6 +1,6 @@
 # DeepSeek Harness Adapter — Full Paperclip-Feature Parity Plan
 
-Status: Phase 3 landed (`feat/deepseek-harness-support`); Phase 4 stretch optional
+Status: Complete (`feat/deepseek-harness-support`)
 Date: 2026-08-29
 Audience: Engineering
 Scope: Add a Paperclip agent adapter for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) that matches `claude_local` on Paperclip control-plane features (heartbeat execute, sessions, skills, instructions, usage, transcripts, env test, remote/sandbox, JWT, config schema). Not a goal: make `dsh` behave like Claude Code.
@@ -494,3 +494,8 @@ Parser and turn accounting now match dsh `0.1.1-rc.2` `SessionEventMap` / `Strea
 - Workspace restore runs in `finally`. Restore failure fails the run.
 - Local Linux `filesystemScope` / `networkScope` wrap the JSON-RPC runtime via `buildLocalProcessSandboxSpawnTarget`.
 - Remote env test uses the same bridge after `prepareAdapterExecutionTargetRuntime`.
+- `sessionCodec` preserves `remoteExecution` so heartbeat serialize/deserialize does not drop SSH/sandbox resume identity.
+
+## 22. Phase 4 (deferred)
+
+Not implemented in this branch. There is no stable DeepSeek quota API for `getQuotaWindows`. JSON-RPC MCP would require a stdout-safe plugin composition. A Hermes-style reverse task-bridge is out of scope for Claude execute parity.
