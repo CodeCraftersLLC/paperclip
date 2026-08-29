@@ -105,6 +105,8 @@ There is no \`claude setup-token\` login flow.
 | env | {} | Secret refs allowed |
 
 Sessions are stored under \`$PAPERCLIP_HOME/adapter-state/<company>/<agent>/deepseek/sessions\` (\`DSH_SESSION_ROOT\`), not \`~/.dsh\`.
+
+SSH and sandbox targets run a one-shot JSON-RPC bridge because execution-target stdin is not duplex. The remote host must already have \`dsh-jsonrpc-agent\` and harness plugins (\`installCommand\` is null).
 `;
 
 export function createServerAdapter(): ServerAdapterModule {

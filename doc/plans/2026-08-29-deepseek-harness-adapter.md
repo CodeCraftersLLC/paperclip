@@ -1,6 +1,6 @@
 # DeepSeek Harness Adapter — Full Paperclip-Feature Parity Plan
 
-Status: In progress (`feat/deepseek-harness-support`)
+Status: Phase 3 landed (`feat/deepseek-harness-support`); Phase 4 stretch optional
 Date: 2026-08-29
 Audience: Engineering
 Scope: Add a Paperclip agent adapter for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) that matches `claude_local` on Paperclip control-plane features (heartbeat execute, sessions, skills, instructions, usage, transcripts, env test, remote/sandbox, JWT, config schema). Not a goal: make `dsh` behave like Claude Code.
@@ -485,3 +485,12 @@ Parser and turn accounting now match dsh `0.1.1-rc.2` `SessionEventMap` / `Strea
 - `createStdoutParser` accumulates usage; idle result uses `assistant/message.usage` when present and falls back to chunk usage so the run-viewer card is not hardcoded zeros. Message and chunk usage are not double-counted.
 - `materializeDeepseekSkills` rewrites the materialized root (deselected siblings are deleted).
 - Instructions append the Claude-equivalent HEARTBEAT.md / SOUL.md path directive.
+
+## 21. Phase 3 results (2026-08-29)
+
+- `deepseek_local` is in `REMOTE_MANAGED_ADAPTERS` (local / SSH / sandbox).
+- Remote execute uploads a Paperclip-owned one-shot JSON-RPC bridge because execution targets only accept one-shot stdin. The bridge implements subscribe → `session/prompt` → inbox receipt → idle and prints `paperclipDeepseek` JSONL plus `bridge-result`.
+- Assets: shipped Cordis file, bridge script, session root, materialized skills. `installCommand` stays `null`.
+- Workspace restore runs in `finally`. Restore failure fails the run.
+- Local Linux `filesystemScope` / `networkScope` wrap the JSON-RPC runtime via `buildLocalProcessSandboxSpawnTarget`.
+- Remote env test uses the same bridge after `prepareAdapterExecutionTargetRuntime`.

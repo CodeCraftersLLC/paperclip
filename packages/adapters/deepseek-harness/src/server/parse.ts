@@ -65,4 +65,46 @@ export function parseTurnNotifications(notifications: JsonRpcNotification[]): De
   };
 }
 
+export function parseBridgeResultLine(line: string): DeepseekTurnParse & { sessionId?: string } | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (parsed.paperclipDeepseek !== 1 || parsed.kind !== "bridge-result") return null;
+    const usage = isRecord(parsed.usage) ? parsed.usage : {};
+    const errorMessage = typeof parsed.errorMessage === "string" && parsed.errorMessage ? parsed.errorMessage : null;
+    return {
+      usage: {
+        inputTokens: Number(usage.inputTokens ?? 0),
+        outputTokens: Number(usage.outputTokens ?? 0),
+        cachedInputTokens: Number(usage.cachedInputTokens ?? 0),
+      },
+      summary: typeof parsed.summary === "string" ? parsed.summary : null,
+      toolName: typeof parsed.toolName === "string" ? parsed.toolName : null,
+      errorMessage,
+      errorFamily: errorMessage ? classifyDeepseekError(errorMessage) : null,
+      unknownSession: errorMessage ? isUnknownSessionError(errorMessage) : false,
+      sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function parseBridgeStdout(stdout: string): DeepseekTurnParse & { sessionId?: string } {
+  let latest: DeepseekTurnParse & { sessionId?: string } | null = null;
+  for (const line of stdout.split(/\r?\n/)) {
+    const parsed = parseBridgeResultLine(line);
+    if (parsed) latest = parsed;
+  }
+  return latest ?? {
+    usage: EMPTY_USAGE,
+    summary: null,
+    toolName: null,
+    errorMessage: "DeepSeek remote bridge did not emit a result",
+    errorFamily: null,
+    unknownSession: false,
+  };
+}
+
 export { isUnknownSessionError };

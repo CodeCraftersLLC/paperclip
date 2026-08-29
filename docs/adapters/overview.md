@@ -25,7 +25,7 @@ When a heartbeat fires, Paperclip:
 | OpenCode | `opencode_local` | Runs OpenCode CLI locally (multi-provider `provider/model`) |
 | Cursor | `cursor` | Runs Cursor in background mode |
 | Pi | `pi_local` | Runs an embedded Pi agent locally |
-| [DeepSeek Harness](/adapters/deepseek-local) | `deepseek_local` | Runs DeepSeek Harness locally over JSON-RPC stdio |
+| [DeepSeek Harness](/adapters/deepseek-local) | `deepseek_local` | Runs DeepSeek Harness over JSON-RPC stdio (local, SSH, or sandbox via a one-shot bridge) |
 | Hermes | `hermes_local` | Runs the local Hermes CLI through `@paperclipai/hermes-paperclip-adapter` |
 | Hermes Gateway | `hermes_gateway` | Calls an already-running Hermes API server through `@paperclipai/hermes-paperclip-adapter/gateway` |
 | OpenClaw Gateway | `openclaw_gateway` | Connects to an OpenClaw gateway endpoint |

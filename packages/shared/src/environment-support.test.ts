@@ -43,6 +43,14 @@ describe("isSandboxProviderSupportedForAdapter", () => {
     ]);
   });
 
+  it("treats deepseek_local as a remote-managed local adapter", () => {
+    expect(adapterSupportsRemoteManagedEnvironments("deepseek_local")).toBe(true);
+    expect(supportedEnvironmentDriversForAdapter("deepseek_local")).toEqual(["local", "ssh", "sandbox"]);
+    expect(
+      isSandboxProviderSupportedForAdapter("deepseek_local", "fake-plugin", ["fake-plugin"]),
+    ).toBe(true);
+  });
+
   it("treats kimi_local as a remote-managed local adapter", () => {
     expect(adapterSupportsRemoteManagedEnvironments("kimi_local")).toBe(true);
     expect(supportedEnvironmentDriversForAdapter("kimi_local")).toEqual(["local", "ssh", "sandbox"]);

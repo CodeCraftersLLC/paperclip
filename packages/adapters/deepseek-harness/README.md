@@ -26,3 +26,7 @@ There is no Claude `setup-token` login. ACP is not advertised: dsh ACP is fresh-
 ## Sessions
 
 Paperclip generates a `sessionId` and reuses it on `session/prompt`. Session files live under `$PAPERCLIP_HOME/adapter-state/<company>/<agent>/deepseek/sessions` (`DSH_SESSION_ROOT`), not `~/.dsh`.
+
+## Remote / sandbox
+
+SSH and sandbox runs upload a one-shot JSON-RPC bridge (`remote-bridge.mjs`), the shipped Cordis file, and the session/skill roots. The remote host must already have `dsh-jsonrpc-agent` and harness plugins; `installCommand` is `null`. Workspace restore runs in `finally` and never `git push`.

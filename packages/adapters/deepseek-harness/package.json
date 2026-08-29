@@ -52,7 +52,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && cp src/server/paperclip.cordis.yml dist/server/paperclip.cordis.yml",
+    "build": "tsc && cp src/server/paperclip.cordis.yml dist/server/paperclip.cordis.yml && cp src/server/remote-bridge.mjs dist/server/remote-bridge.mjs",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

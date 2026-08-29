@@ -86,3 +86,22 @@ describe("parseTurnNotifications", () => {
     expect(parsed.usage).toEqual({ inputTokens: 3, outputTokens: 1, cachedInputTokens: 0 });
   });
 });
+
+describe("parseBridgeStdout", () => {
+  it("reads the last bridge-result line", async () => {
+    const { parseBridgeStdout } = await import("./parse.js");
+    const parsed = parseBridgeStdout([
+      JSON.stringify({ paperclipDeepseek: 1, method: "session.status", params: { status: "idle" } }),
+      JSON.stringify({
+        paperclipDeepseek: 1,
+        kind: "bridge-result",
+        sessionId: "s1",
+        usage: { inputTokens: 2, outputTokens: 1, cachedInputTokens: 0 },
+        summary: "ok",
+      }),
+    ].join("\n"));
+    expect(parsed.sessionId).toBe("s1");
+    expect(parsed.summary).toBe("ok");
+    expect(parsed.usage.inputTokens).toBe(2);
+  });
+});

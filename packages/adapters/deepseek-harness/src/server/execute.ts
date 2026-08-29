@@ -1,41 +1,26 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import {
   adapterExecutionTargetIsRemote,
+  adapterExecutionTargetSessionMatches,
   readAdapterExecutionTarget,
 } from "@paperclipai/adapter-utils/execution-target";
 import {
-  asNumber,
-  asString,
   asStringArray,
   buildInvocationEnvForLogs,
-  buildPaperclipEnv,
-  ensureAbsoluteDirectory,
-  joinPromptSections,
   parseObject,
-  renderPaperclipWakePrompt,
-  renderTemplate,
-  isPaperclipRecoveryWakePayload,
-  stringifyPaperclipWakePayload,
-  DEFAULT_PAPERCLIP_AGENT_PROMPT_TEMPLATE,
 } from "@paperclipai/adapter-utils/server-utils";
+import {
+  buildLocalProcessSandboxSpawnTarget,
+  parseLocalProcessFilesystemScope,
+  parseLocalProcessNetworkAllowlist,
+  parseLocalProcessNetworkScope,
+  parseLocalProcessSandboxExtraPaths,
+  type LocalProcessSandboxOptions,
+} from "@paperclipai/adapter-utils/local-process-sandbox";
 import { ADAPTER_TYPE } from "../shared/constants.js";
 import { classifyDeepseekError, isUnknownSessionError } from "./protocol.js";
 import { parseTurnNotifications } from "./parse.js";
-import { canResumeDeepseekSession, sessionCodec } from "./session.js";
-import {
-  buildRuntimeNodePath,
-  persistSessionEnabled,
-  resolveCordisConfigPath,
-  resolveDeepseekCommand,
-  resolveDeepseekModel,
-  resolveDeepseekProvider,
-  resolveDeepseekSessionRoot,
-  resolveGraceSec,
-  resolveHarnessRoot,
-  resolveTimeoutSec,
-} from "./runtime-config.js";
+import { canResumeDeepseekSession } from "./session.js";
 import {
   formatRpcError,
   initializeRuntime,
@@ -43,177 +28,127 @@ import {
   promptAndWait,
   spawnDeepseekRuntime,
 } from "./jsonrpc-runtime.js";
-import { materializeDeepseekSkills, resolveDeepseekSkillsDir } from "./skills.js";
+import { resolveDeepseekExecuteSetup } from "./execute-setup.js";
+import { executeRemote } from "./execute-remote.js";
 import type { JsonRpcNotification } from "./jsonrpc-client.js";
 
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-  const { runId, agent, runtime, config, context, onLog, onMeta, onSpawn, authToken } = ctx;
+  const { runtime, config, onLog, onMeta, onSpawn } = ctx;
   const executionTarget = readAdapterExecutionTarget({
     executionTarget: ctx.executionTarget,
     legacyRemoteExecution: ctx.executionTransport?.remoteExecution,
   });
-  if (adapterExecutionTargetIsRemote(executionTarget)) {
-    return {
-      exitCode: 1,
-      signal: null,
-      timedOut: false,
-      errorMessage:
-        "deepseek_local remote/SSH/sandbox execution is not implemented in Phase 1. Use a local execution target.",
-      errorCode: "remote_not_implemented",
-    };
-  }
+  const executionTargetIsRemote = adapterExecutionTargetIsRemote(executionTarget);
 
-  const workspaceContext = parseObject(context.paperclipWorkspace);
-  const workspaceCwd = asString(workspaceContext.cwd, "");
-  const workspaceSource = asString(workspaceContext.source, "");
-  const configuredCwd = asString(config.cwd, "");
-  const useConfiguredInsteadOfAgentHome = workspaceSource === "agent_home" && configuredCwd.length > 0;
-  const cwd = (useConfiguredInsteadOfAgentHome ? "" : workspaceCwd) || configuredCwd || process.cwd();
-  await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
-
-  const envConfig = parseObject(config.env);
-  const env: Record<string, string> = { ...buildPaperclipEnv(agent) };
-  env.PAPERCLIP_RUN_ID = runId;
-  if (authToken) env.PAPERCLIP_API_KEY = authToken;
-  for (const [key, value] of Object.entries(envConfig)) {
-    if (typeof value === "string") env[key] = value;
-  }
-
-  const wakeTaskId =
-    asString(context.taskId, "") || asString(context.issueId, "") || null;
-  if (wakeTaskId) env.PAPERCLIP_TASK_ID = wakeTaskId;
-  const wakePayloadJson = stringifyPaperclipWakePayload(context.paperclipWake);
-  if (wakePayloadJson) env.PAPERCLIP_WAKE_PAYLOAD_JSON = wakePayloadJson;
-
-  const sessionRoot = resolveDeepseekSessionRoot({
-    companyId: agent.companyId,
-    agentId: agent.id,
-    sessionRoot: asString(config.sessionRoot, ""),
+  const preliminary = await resolveDeepseekExecuteSetup(ctx, {
+    sessionId: mintSessionId(),
+    canResume: false,
   });
-  await fs.mkdir(sessionRoot, { recursive: true });
-  const skillsDir = resolveDeepseekSkillsDir({ companyId: agent.companyId, agentId: agent.id });
-  const stagedSkills = await materializeDeepseekSkills({ config, destDir: skillsDir });
-  if (stagedSkills > 0) {
-    env.DSH_BUNDLED_SKILL_DIR = skillsDir;
-    await onLog("stdout", `[paperclip] Materialized ${stagedSkills} DeepSeek skill(s) into ${skillsDir}\n`);
-  }
-
-  const command = resolveDeepseekCommand(config, env);
-  const harnessRoot = resolveHarnessRoot(config, env);
-  const cordisConfigPath = resolveCordisConfigPath(config, env);
-  const model = resolveDeepseekModel(config, env);
-  const provider = resolveDeepseekProvider(config);
-  const timeoutSec = resolveTimeoutSec(config);
-  const graceSec = resolveGraceSec(config);
-  const maxTokens = asNumber(config.maxTokens, 0);
-
-  env.DSH_CWD = cwd;
-  env.DSH_SESSION_ROOT = sessionRoot;
-  env.DSH_MODEL = model;
-  env.DSH_CORDIS_CONFIG = cordisConfigPath;
-  const nodePath = buildRuntimeNodePath(harnessRoot, env.NODE_PATH ?? process.env.NODE_PATH);
-  if (nodePath) env.NODE_PATH = nodePath;
-
-  const instructionsFilePath = asString(config.instructionsFilePath, "").trim();
-  if (instructionsFilePath) {
-    try {
-      const instructionsContent = await fs.readFile(instructionsFilePath, "utf8");
-      const instructionsFileDir = path.dirname(path.resolve(instructionsFilePath));
-      env.DSH_SYSTEM_PROMPT =
-        `${instructionsContent}\nThe above agent instructions were loaded from ${instructionsFilePath}. ` +
-        `Resolve any relative file references from ${instructionsFileDir}. ` +
-        `This base directory is authoritative for sibling instruction files such as ` +
-        `./HEARTBEAT.md, ./SOUL.md, and ./TOOLS.md; do not resolve those from the parent agent directory.`;
-    } catch {
-      await onLog(
-        "stderr",
-        `[paperclip] DeepSeek instructions file was missing: ${instructionsFilePath}\n`,
-      );
-    }
-  }
-
-  const runtimeSession = sessionCodec.deserialize(runtime.sessionParams) ?? {};
-  const savedSessionId = asString(runtimeSession.sessionId, runtime.sessionId ?? "");
-  const savedCwd = asString(runtimeSession.cwd, "");
-  const savedSessionRoot = asString(runtimeSession.sessionRoot, "");
-  const persist = persistSessionEnabled(config);
+  const savedRemoteExecution = parseObject(
+    (runtime.sessionParams && typeof runtime.sessionParams === "object"
+      ? (runtime.sessionParams as Record<string, unknown>).remoteExecution
+      : null),
+  );
   const canResume =
-    persist &&
+    preliminary.persist &&
     canResumeDeepseekSession({
-      sessionId: savedSessionId || null,
-      savedCwd: savedCwd || null,
-      savedSessionRoot: savedSessionRoot || null,
-      cwd,
-      sessionRoot,
-    });
-  let sessionId = canResume ? savedSessionId : persist ? mintSessionId() : mintSessionId();
-  if (savedSessionId && !canResume) {
+      sessionId: preliminary.savedSessionId || null,
+      savedCwd: executionTargetIsRemote ? null : preliminary.savedCwd || null,
+      savedSessionRoot: preliminary.savedSessionRoot || null,
+      cwd: preliminary.cwd,
+      sessionRoot: preliminary.sessionRoot,
+    }) &&
+    (executionTargetIsRemote
+      ? adapterExecutionTargetSessionMatches(savedRemoteExecution, executionTarget)
+      : Object.keys(savedRemoteExecution).length === 0);
+  const sessionId = canResume && preliminary.savedSessionId ? preliminary.savedSessionId : mintSessionId();
+  const setup = canResume
+    ? await resolveDeepseekExecuteSetup(ctx, { sessionId, canResume: true })
+    : { ...preliminary, sessionId };
+  setup.extraArgs = asStringArray(config.extraArgs);
+
+  if (preliminary.savedSessionId && !canResume) {
     await onLog(
       "stdout",
-      `[paperclip] DeepSeek session "${savedSessionId}" does not match cwd/sessionRoot and will not be resumed.\n`,
+      `[paperclip] DeepSeek session "${preliminary.savedSessionId}" does not match cwd/sessionRoot/target and will not be resumed.\n`,
     );
   }
 
-  const promptTemplate = asString(config.promptTemplate, DEFAULT_PAPERCLIP_AGENT_PROMPT_TEMPLATE);
-  const wakePrompt = renderPaperclipWakePrompt(context.paperclipWake, {
-    resumedSession: Boolean(canResume && savedSessionId),
-  });
-  const renderedPrompt =
-    (canResume && wakePrompt.length > 0) || isPaperclipRecoveryWakePayload(context.paperclipWake)
-      ? ""
-      : renderTemplate(promptTemplate, {
-          agentId: agent.id,
-          companyId: agent.companyId,
-          runId,
-          company: { id: agent.companyId },
-          agent,
-          run: { id: runId, source: "on_demand" },
-          context,
-        });
-  const prompt = joinPromptSections([
-    wakePrompt,
-    asString(context.paperclipSessionHandoffMarkdown, "").trim(),
-    renderedPrompt,
-  ]);
-
-  const runtimeEnv = Object.fromEntries(
-    Object.entries({ ...process.env, ...env }).filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string",
-    ),
-  );
+  if (executionTargetIsRemote && executionTarget) {
+    return executeRemote({ ctx, setup, executionTarget });
+  }
 
   if (onMeta) {
     await onMeta({
       adapterType: ADAPTER_TYPE,
-      command,
-      cwd,
+      command: setup.command,
+      cwd: setup.cwd,
       commandNotes: [
         "Drives DeepSeek Harness over JSON-RPC stdio (initialize + session/prompt).",
-        `Cordis config: ${cordisConfigPath}`,
-        harnessRoot ? `Harness root / NODE_PATH: ${harnessRoot}` : "No harnessRoot set; plugins must resolve from the configuration project.",
+        `Cordis config: ${setup.cordisConfigPath}`,
+        setup.harnessRoot
+          ? `Harness root / NODE_PATH: ${setup.harnessRoot}`
+          : "No harnessRoot set; plugins must resolve from the configuration project.",
         "Do not add a stdout logger to the Cordis composition.",
       ],
-      env: buildInvocationEnvForLogs(env, { runtimeEnv }),
-      prompt,
+      env: buildInvocationEnvForLogs(setup.env, {
+        runtimeEnv: Object.fromEntries(
+          Object.entries({ ...process.env, ...setup.env }).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string",
+          ),
+        ),
+      }),
+      prompt: setup.prompt,
       promptMetrics: {
-        promptChars: prompt.length,
-        wakePromptChars: wakePrompt.length,
-        heartbeatPromptChars: renderedPrompt.length,
+        promptChars: setup.prompt.length,
+        wakePromptChars: setup.wakePrompt.length,
+        heartbeatPromptChars: setup.renderedPrompt.length,
       },
-      context: { sessionId, sessionRoot, model, provider },
+      context: { sessionId: setup.sessionId, sessionRoot: setup.sessionRoot, model: setup.model, provider: setup.provider },
     });
   }
 
-  const timeoutMs = timeoutSec > 0 ? timeoutSec * 1000 : 30 * 60 * 1000;
-  let timedOut = false;
-  let clearSession = false;
-  let exitCode: number | null = 0;
-  let signal: string | null = null;
-  let errorMessage: string | null = null;
+  const filesystemScope = parseLocalProcessFilesystemScope(config.filesystemScope);
+  const networkScope = parseLocalProcessNetworkScope(config.networkScope);
+  let command = setup.command;
+  let args = setup.extraArgs;
+  let cwd = setup.cwd;
+  const runtimeEnv: NodeJS.ProcessEnv = Object.fromEntries(
+    Object.entries({ ...process.env, ...setup.env }).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+  let sandboxCleanup: (() => Promise<void>) | undefined;
+  if (filesystemScope || networkScope) {
+    const localProcessSandbox: LocalProcessSandboxOptions = {
+      workspaceDir: setup.cwd,
+      filesystemScope,
+      extraPaths: parseLocalProcessSandboxExtraPaths(config.filesystemExtraPaths),
+      homeDir: filesystemScope ? setup.sessionRoot : null,
+      networkScope,
+      networkAllowlist: parseLocalProcessNetworkAllowlist(config.networkAllowlist),
+      command: typeof config.filesystemSandboxCommand === "string" ? config.filesystemSandboxCommand : "bwrap",
+    };
+    const scopes = [filesystemScope ? "workspace filesystem" : null, networkScope ? `${networkScope} network` : null]
+      .filter(Boolean)
+      .join(" and ");
+    await onLog("stdout", `[paperclip] Confining DeepSeek Harness with ${scopes} scope.\n`);
+    const sandboxed = await buildLocalProcessSandboxSpawnTarget({
+      executable: command,
+      args,
+      cwd,
+      options: localProcessSandbox,
+    });
+    command = sandboxed.command;
+    args = sandboxed.args;
+    cwd = sandboxed.cwd;
+    Object.assign(runtimeEnv, sandboxed.env);
+    sandboxCleanup = sandboxed.cleanup;
+  }
 
   const runtimeHandle = await spawnDeepseekRuntime({
     command,
-    args: asStringArray(config.extraArgs),
+    args,
     cwd,
     env: runtimeEnv,
     onStderr: (chunk) => onLog("stderr", chunk),
@@ -226,39 +161,36 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   try {
     await initializeRuntime(runtimeHandle.client, {
-      cwd,
-      provider,
-      model,
-      ...(maxTokens > 0 ? { maxTokens } : {}),
+      cwd: setup.cwd,
+      provider: setup.provider,
+      model: setup.model,
+      ...(setup.maxTokens > 0 ? { maxTokens: setup.maxTokens } : {}),
     });
 
     const runPrompt = async (id: string) =>
       promptAndWait({
         client: runtimeHandle.client,
         sessionId: id,
-        prompt,
-        timeoutMs,
+        prompt: setup.prompt,
+        timeoutMs: setup.timeoutMs,
         onNotification: emitNotification,
       });
 
     try {
-      const turn = await runPrompt(sessionId);
+      const turn = await runPrompt(setup.sessionId);
       const parsed = parseTurnNotifications(turn.notifications);
-      errorMessage = parsed.errorMessage;
       if (parsed.unknownSession) {
-        clearSession = true;
-        sessionId = mintSessionId();
+        const retryId = mintSessionId();
         await onLog("stdout", `[paperclip] DeepSeek session was unknown; retrying with a fresh session.\n`);
-        const retry = await runPrompt(sessionId);
+        const retry = await runPrompt(retryId);
         const retryParsed = parseTurnNotifications(retry.notifications);
-        const closed = await runtimeHandle.close(graceSec * 1000);
+        const closed = await runtimeHandle.close(setup.graceSec * 1000);
         return buildResult({
-          sessionId,
-          cwd,
-          sessionRoot,
-          model,
-          provider,
-          persist,
+          sessionId: retryId,
+          cwd: setup.cwd,
+          sessionRoot: setup.sessionRoot,
+          model: setup.model,
+          persist: setup.persist,
           parsed: retryParsed,
           exitCode: closed.exitCode ?? (retryParsed.errorMessage ? 1 : 0),
           signal: closed.signal,
@@ -266,39 +198,34 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           clearSession: true,
         });
       }
-      const closed = await runtimeHandle.close(graceSec * 1000);
-      exitCode = closed.exitCode ?? (parsed.errorMessage ? 1 : 0);
-      signal = closed.signal;
+      const closed = await runtimeHandle.close(setup.graceSec * 1000);
       return buildResult({
-        sessionId,
-        cwd,
-        sessionRoot,
-        model,
-        provider,
-        persist,
+        sessionId: setup.sessionId,
+        cwd: setup.cwd,
+        sessionRoot: setup.sessionRoot,
+        model: setup.model,
+        persist: setup.persist,
         parsed,
-        exitCode,
-        signal,
+        exitCode: closed.exitCode ?? (parsed.errorMessage ? 1 : 0),
+        signal: closed.signal,
         timedOut: false,
         clearSession: false,
       });
     } catch (error) {
       const message = formatRpcError(error);
       if (isUnknownSessionError(message)) {
-        clearSession = true;
-        sessionId = mintSessionId();
+        const retryId = mintSessionId();
         await onLog("stdout", `[paperclip] DeepSeek session was unknown; retrying with a fresh session.\n`);
         try {
-          const retry = await runPrompt(sessionId);
+          const retry = await runPrompt(retryId);
           const retryParsed = parseTurnNotifications(retry.notifications);
-          const closed = await runtimeHandle.close(graceSec * 1000);
+          const closed = await runtimeHandle.close(setup.graceSec * 1000);
           return buildResult({
-            sessionId,
-            cwd,
-            sessionRoot,
-            model,
-            provider,
-            persist,
+            sessionId: retryId,
+            cwd: setup.cwd,
+            sessionRoot: setup.sessionRoot,
+            model: setup.model,
+            persist: setup.persist,
             parsed: retryParsed,
             exitCode: closed.exitCode ?? (retryParsed.errorMessage ? 1 : 0),
             signal: closed.signal,
@@ -307,7 +234,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           });
         } catch (retryError) {
           const retryMessage = formatRpcError(retryError);
-          const closed = await runtimeHandle.close(graceSec * 1000);
+          const closed = await runtimeHandle.close(setup.graceSec * 1000);
           return {
             exitCode: closed.exitCode ?? 1,
             signal: closed.signal,
@@ -316,38 +243,39 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
             errorFamily: classifyDeepseekError(retryMessage),
             clearSession: true,
             provider: "deepseek",
-            model,
+            model: setup.model,
             usageBasis: "per_run",
           };
         }
       }
-      timedOut = /timed out/i.test(message);
-      errorMessage = message;
-      const closed = await runtimeHandle.close(graceSec * 1000);
-      exitCode = timedOut ? null : (closed.exitCode ?? 1);
-      signal = closed.signal;
+      const timedOut = /timed out/i.test(message);
+      const closed = await runtimeHandle.close(setup.graceSec * 1000);
       return {
-        exitCode,
-        signal,
+        exitCode: timedOut ? null : (closed.exitCode ?? 1),
+        signal: closed.signal,
         timedOut,
-        errorMessage,
+        errorMessage: message,
         errorFamily: classifyDeepseekError(message),
-        clearSession,
+        clearSession: false,
         provider: "deepseek",
-        model,
+        model: setup.model,
         usageBasis: "per_run",
-        ...(persist
+        ...(setup.persist
           ? {
-              sessionId,
-              sessionParams: { sessionId, cwd, sessionRoot },
-              sessionDisplayId: sessionId,
+              sessionId: setup.sessionId,
+              sessionParams: {
+                sessionId: setup.sessionId,
+                cwd: setup.cwd,
+                sessionRoot: setup.sessionRoot,
+              },
+              sessionDisplayId: setup.sessionId,
             }
           : {}),
       };
     }
   } catch (error) {
-    errorMessage = formatRpcError(error);
-    const closed = await runtimeHandle.close(graceSec * 1000);
+    const errorMessage = formatRpcError(error);
+    const closed = await runtimeHandle.close(setup.graceSec * 1000);
     return {
       exitCode: closed.exitCode ?? 1,
       signal: closed.signal,
@@ -355,9 +283,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       errorMessage,
       errorFamily: classifyDeepseekError(errorMessage),
       provider: "deepseek",
-      model,
+      model: setup.model,
       usageBasis: "per_run",
     };
+  } finally {
+    await sandboxCleanup?.().catch(() => undefined);
   }
 }
 
@@ -366,7 +296,6 @@ function buildResult(input: {
   cwd: string;
   sessionRoot: string;
   model: string;
-  provider: string;
   persist: boolean;
   parsed: ReturnType<typeof parseTurnNotifications>;
   exitCode: number | null;

@@ -91,18 +91,6 @@ describe("execute", () => {
     expect(result.summary).toMatch(/^ack /);
   });
 
-  it("rejects remote execution targets in Phase 1/2", async () => {
-    const ctx = await makeCtx();
-    ctx.executionTarget = {
-      kind: "remote",
-      transport: "sandbox",
-      remoteCwd: "/remote/workspace",
-    } as AdapterExecutionContext["executionTarget"];
-    const result = await execute(ctx);
-    expect(result.errorCode).toBe("remote_not_implemented");
-    expect(result.exitCode).toBe(1);
-  });
-
   it("resumes the same sessionId on a second heartbeat", async () => {
     const firstCtx = await makeCtx();
     const first = await execute(firstCtx);

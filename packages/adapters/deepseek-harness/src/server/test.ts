@@ -9,8 +9,12 @@ import type {
 import {
   describeAdapterExecutionTarget,
   ensureAdapterExecutionTargetCommandResolvable,
+  prepareAdapterExecutionTargetRuntime,
   readAdapterExecutionTarget,
+  runAdapterExecutionTargetProcess,
 } from "@paperclipai/adapter-utils/execution-target";
+import { resolveDeepseekRemoteBridgePath } from "./remote-bridge-path.js";
+import { parseBridgeStdout } from "./parse.js";
 import { asNumber, asString, ensureAbsoluteDirectory, parseObject } from "@paperclipai/adapter-utils/server-utils";
 import { ADAPTER_TYPE, DEFAULT_HELLO_PROBE_TIMEOUT_SEC } from "../shared/constants.js";
 import {
@@ -76,9 +80,9 @@ export async function testEnvironment(
 
   if (targetIsRemote) {
     checks.push({
-      code: "remote_not_implemented",
-      level: "warn",
-      message: "deepseek_local remote environment probes land in Phase 3. Local JSON-RPC checks ran on the Paperclip host.",
+      code: "target_remote",
+      level: "info",
+      message: "Remote DeepSeek probes use the one-shot JSON-RPC bridge (execution targets do not expose duplex stdin).",
     });
   }
 
@@ -102,7 +106,7 @@ export async function testEnvironment(
   }
 
   try {
-    await ensureAdapterExecutionTargetCommandResolvable(command, null, cwd, {
+    await ensureAdapterExecutionTargetCommandResolvable(command, target, cwd, {
       ...process.env,
       ...env,
     });
@@ -184,37 +188,51 @@ export async function testEnvironment(
     const probeCwd = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-dsh-probe-"));
     const timeoutSec = Math.max(5, asNumber(config.helloProbeTimeoutSec, DEFAULT_HELLO_PROBE_TIMEOUT_SEC));
     try {
-      const runtime = await spawnDeepseekRuntime({
-        command,
-        cwd: probeCwd,
-        env: {
-          ...process.env,
-          ...env,
-          DSH_CWD: probeCwd,
-          DSH_CORDIS_CONFIG: cordisConfigPath,
-          DSH_SESSION_ROOT: path.join(probeCwd, "sessions"),
-          DSH_MODEL: model,
-          ...(harnessRoot
-            ? { NODE_PATH: `${path.join(harnessRoot, "node_modules")}${path.delimiter}${process.env.NODE_PATH ?? ""}` }
-            : {}),
-        },
-      });
-      try {
-        await initializeRuntime(runtime.client, { cwd: probeCwd, provider, model });
-        await promptAndWait({
-          client: runtime.client,
-          sessionId: mintSessionId(),
-          prompt: "Respond with hello.",
-          timeoutMs: timeoutSec * 1000,
+      if (targetIsRemote && target) {
+        await probeRemoteHello({
+          runId: "deepseek-env-test",
+          target,
+          command,
+          cwd: probeCwd,
+          env,
+          cordisConfigPath,
+          model,
+          provider,
+          timeoutSec,
         });
-        checks.push({
-          code: "hello_probe",
-          level: "info",
-          message: "JSON-RPC initialize + session/prompt succeeded",
+      } else {
+        const runtime = await spawnDeepseekRuntime({
+          command,
+          cwd: probeCwd,
+          env: {
+            ...process.env,
+            ...env,
+            DSH_CWD: probeCwd,
+            DSH_CORDIS_CONFIG: cordisConfigPath,
+            DSH_SESSION_ROOT: path.join(probeCwd, "sessions"),
+            DSH_MODEL: model,
+            ...(harnessRoot
+              ? { NODE_PATH: `${path.join(harnessRoot, "node_modules")}${path.delimiter}${process.env.NODE_PATH ?? ""}` }
+              : {}),
+          },
         });
-      } finally {
-        await runtime.close(5_000);
+        try {
+          await initializeRuntime(runtime.client, { cwd: probeCwd, provider, model });
+          await promptAndWait({
+            client: runtime.client,
+            sessionId: mintSessionId(),
+            prompt: "Respond with hello.",
+            timeoutMs: timeoutSec * 1000,
+          });
+        } finally {
+          await runtime.close(5_000);
+        }
       }
+      checks.push({
+        code: "hello_probe",
+        level: "info",
+        message: "JSON-RPC initialize + session/prompt succeeded",
+      });
     } catch (error) {
       checks.push({
         code: "hello_probe",
@@ -233,4 +251,83 @@ export async function testEnvironment(
     checks,
     testedAt: new Date().toISOString(),
   };
+}
+
+async function probeRemoteHello(input: {
+  runId: string;
+  target: NonNullable<AdapterEnvironmentTestContext["executionTarget"]>;
+  command: string;
+  cwd: string;
+  env: Record<string, string>;
+  cordisConfigPath: string;
+  model: string;
+  provider: string;
+  timeoutSec: number;
+}): Promise<void> {
+  const stageDir = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-dsh-probe-assets-"));
+  let restore: (() => Promise<void>) | null = null;
+  try {
+    const cordisDir = path.join(stageDir, "cordis");
+    const bridgeDir = path.join(stageDir, "bridge");
+    const sessionDir = path.join(stageDir, "sessions");
+    await fs.mkdir(cordisDir, { recursive: true });
+    await fs.mkdir(bridgeDir, { recursive: true });
+    await fs.mkdir(sessionDir, { recursive: true });
+    await fs.copyFile(input.cordisConfigPath, path.join(cordisDir, "paperclip.cordis.yml"));
+    await fs.copyFile(resolveDeepseekRemoteBridgePath(), path.join(bridgeDir, "remote-bridge.mjs"));
+    const prepared = await prepareAdapterExecutionTargetRuntime({
+      runId: input.runId,
+      target: input.target,
+      adapterKey: "deepseek",
+      workspaceLocalDir: input.cwd,
+      timeoutSec: input.timeoutSec,
+      syncWorkspace: false,
+      assets: [
+        { key: "cordis", localDir: cordisDir },
+        { key: "bridge", localDir: bridgeDir },
+        { key: "sessions", localDir: sessionDir },
+      ],
+    });
+    restore = () => prepared.restoreWorkspace();
+    const remoteCwd = prepared.workspaceRemoteDir ?? input.cwd;
+    const remoteBridge = prepared.assetDirs.bridge
+      ? path.posix.join(prepared.assetDirs.bridge, "remote-bridge.mjs")
+      : resolveDeepseekRemoteBridgePath();
+    const remoteCordis = prepared.assetDirs.cordis
+      ? path.posix.join(prepared.assetDirs.cordis, "paperclip.cordis.yml")
+      : input.cordisConfigPath;
+    const remoteSessions = prepared.assetDirs.sessions ?? sessionDir;
+    let stdout = "";
+    const result = await runAdapterExecutionTargetProcess(input.runId, input.target, "node", [remoteBridge], {
+      cwd: remoteCwd,
+      env: Object.fromEntries(
+        Object.entries({
+          ...process.env,
+          ...input.env,
+          DSH_CWD: remoteCwd,
+          DSH_CORDIS_CONFIG: remoteCordis,
+          DSH_SESSION_ROOT: remoteSessions,
+          DSH_MODEL: input.model,
+          DSH_PROVIDER: input.provider,
+          DSH_JSONRPC_COMMAND: input.command,
+          DSH_SESSION_ID: mintSessionId(),
+          DSH_TIMEOUT_MS: String(input.timeoutSec * 1000),
+        }).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+      ),
+      stdin: "Respond with hello.",
+      timeoutSec: input.timeoutSec,
+      graceSec: 5,
+      onLog: async (stream, chunk) => {
+        if (stream === "stdout") stdout += chunk;
+      },
+    });
+    const parsed = parseBridgeStdout(stdout);
+    if (result.exitCode && result.exitCode !== 0) {
+      throw new Error(parsed.errorMessage || `Remote hello probe exited ${result.exitCode}`);
+    }
+    if (parsed.errorMessage) throw new Error(parsed.errorMessage);
+  } finally {
+    await restore?.().catch(() => undefined);
+    await fs.rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }

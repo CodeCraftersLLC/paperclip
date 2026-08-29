@@ -80,6 +80,18 @@ export function getConfigSchema(): AdapterConfigSchema {
         type: "textarea",
         hint: "Optional custom prompt template with {{variable}} placeholders.",
       },
+      {
+        key: "filesystemScope",
+        label: "Filesystem scope",
+        type: "text",
+        hint: "Set to workspace to confine the local JSON-RPC runtime with bwrap (Linux only).",
+      },
+      {
+        key: "networkScope",
+        label: "Network scope",
+        type: "text",
+        hint: "deny or allowlist. Linux-only local confinement around the JSON-RPC runtime.",
+      },
     ],
   };
 }
