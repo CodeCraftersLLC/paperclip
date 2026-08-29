@@ -11,6 +11,8 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 const command = (process.env.DSH_JSONRPC_COMMAND ?? "dsh-jsonrpc-agent").trim();
 const args = parseJsonArgs(process.env.DSH_JSONRPC_ARGS);
@@ -77,6 +79,7 @@ try {
   }
   child.stdin.end();
   await Promise.race([once(child, "exit"), sleep(2_000)]);
+  await exportSessionRoot(process.env.DSH_SESSION_ROOT);
   writeBridgeResult(parseNotifications(notifications, sessionId));
   client.close();
   process.exit(0);
@@ -394,4 +397,33 @@ function textFromBlocks(content) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function exportSessionRoot(sessionRoot) {
+  const root = typeof sessionRoot === "string" ? sessionRoot.trim() : "";
+  if (!root) return;
+  const files = [];
+  async function walk(dir, relative) {
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (entry.name === ".paperclip-session-export.json") continue;
+      const nextRel = relative ? `${relative}/${entry.name}` : entry.name;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full, nextRel);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      files.push({
+        path: nextRel,
+        contents: (await fs.readFile(full)).toString("base64"),
+      });
+    }
+  }
+  await walk(root, "");
+  await fs.writeFile(
+    path.join(root, ".paperclip-session-export.json"),
+    JSON.stringify({ files }),
+    "utf8",
+  ).catch(() => undefined);
 }

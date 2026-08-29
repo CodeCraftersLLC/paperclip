@@ -122,9 +122,16 @@ describe("execute", () => {
       cwd,
       extra: { instructionsFilePath: instructions },
     });
+    let capturedPrompt = "";
+    ctx.onMeta = async (meta) => {
+      const env = meta.env as Record<string, string> | undefined;
+      capturedPrompt = env?.DSH_SYSTEM_PROMPT ?? "";
+    };
     const result = await execute(ctx);
     expect(result.exitCode).toBe(0);
-    expect(ctx.logs.join("")).not.toMatch(/instructions file was missing/);
+    expect(capturedPrompt).toContain("You are the company soul.");
+    expect(capturedPrompt).toContain("HEARTBEAT.md");
+    expect(capturedPrompt).toContain(path.dirname(instructions));
   });
 
   it("retries with clearSession when the runtime rejects the session", async () => {

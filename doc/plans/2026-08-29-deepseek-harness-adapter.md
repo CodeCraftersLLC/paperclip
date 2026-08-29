@@ -495,6 +495,7 @@ Parser and turn accounting now match dsh `0.1.1-rc.2` `SessionEventMap` / `Strea
 - Local Linux `filesystemScope` / `networkScope` wrap the JSON-RPC runtime via `buildLocalProcessSandboxSpawnTarget`.
 - Remote env test uses the same bridge after `prepareAdapterExecutionTargetRuntime`.
 - `sessionCodec` preserves `remoteExecution` so heartbeat serialize/deserialize does not drop SSH/sandbox resume identity.
+- Remote session files are copied back via `.paperclip-session-export.json` on asset restore so the next heartbeat can re-seed `DSH_SESSION_ROOT`.
 
 ## 22. Phase 4 (deferred)
 

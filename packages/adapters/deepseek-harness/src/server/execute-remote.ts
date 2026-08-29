@@ -29,6 +29,7 @@ import { classifyDeepseekError, isUnknownSessionError } from "./protocol.js";
 import { parseBridgeStdout, parseTurnNotifications, type DeepseekTurnParse } from "./parse.js";
 import { formatRpcError, mintSessionId } from "./jsonrpc-runtime.js";
 import { resolveDeepseekRemoteBridgePath } from "./remote-bridge-path.js";
+import { restoreDeepseekSessionExport, SESSION_EXPORT_FILENAME } from "./session-export.js";
 import type { DeepseekExecuteSetup } from "./execute-setup.js";
 
 export async function executeRemote(input: {
@@ -71,7 +72,29 @@ export async function executeRemote(input: {
       assets: [
         { key: "cordis", localDir: cordisDir },
         { key: "bridge", localDir: bridgeDir },
-        { key: "sessions", localDir: setup.sessionRoot },
+        {
+          key: "sessions",
+          localDir: setup.sessionRoot,
+          restore: async ({ assetDir, readFile }) => {
+            try {
+              const exportBytes = await readFile(path.posix.join(assetDir, SESSION_EXPORT_FILENAME));
+              const restored = await restoreDeepseekSessionExport({
+                localSessionRoot: setup.sessionRoot,
+                exportBytes,
+              });
+              if (restored > 0) {
+                await onLog(
+                  "stdout",
+                  `[paperclip] Restored ${restored} DeepSeek session file(s) from the remote target.\n`,
+                );
+              }
+            } catch (error) {
+              const err = error as NodeJS.ErrnoException;
+              if (err.code === "ENOENT") return;
+              throw error;
+            }
+          },
+        },
         ...(setup.skillsDir
           ? [{ key: "skills", localDir: setup.skillsDir, followSymlinks: true }]
           : []),

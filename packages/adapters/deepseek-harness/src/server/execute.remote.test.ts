@@ -141,6 +141,18 @@ describe("execute remote", () => {
     expect(prepareMock).toHaveBeenCalledTimes(1);
     const prepareInput = prepareMock.mock.calls[0]?.[0] as { assets?: Array<{ key: string }> };
     expect(prepareInput.assets?.map((asset) => asset.key).sort()).toEqual(["bridge", "cordis", "sessions"]);
+    const sessionsAsset = (prepareMock.mock.calls[0]?.[0] as {
+      assets?: Array<{ key: string; restore?: (ctx: { assetDir: string; readFile: (p: string) => Promise<Buffer> }) => Promise<void> }>;
+    }).assets?.find((asset) => asset.key === "sessions");
+    const sessionRoot = path.join(String(process.env.PAPERCLIP_HOME), "adapter-state", "company-1", "agent-1", "deepseek", "sessions");
+    await sessionsAsset?.restore?.({
+      assetDir: "/remote/assets/sessions",
+      readFile: async () =>
+        Buffer.from(JSON.stringify({
+          files: [{ path: "session.json", contents: Buffer.from("{\"ok\":true}", "utf8").toString("base64") }],
+        })),
+    });
+    expect(await fs.readFile(path.join(sessionRoot, "session.json"), "utf8")).toBe("{\"ok\":true}");
     expect(runProcessMock).toHaveBeenCalledTimes(1);
     expect(restoreMock).toHaveBeenCalledTimes(1);
     expect(bridgeStopMock).toHaveBeenCalledTimes(1);

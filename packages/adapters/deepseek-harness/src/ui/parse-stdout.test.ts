@@ -121,4 +121,36 @@ describe("createDeepseekStdoutParser", () => {
       errors: [],
     }]);
   });
+
+  it("pairs official tool/result cards with the earlier tool/call name", () => {
+    const parser = createDeepseekStdoutParser();
+    parser.parseLine(
+      eventLine("tool/call", {
+        turn: 1,
+        step: 1,
+        name: "bash",
+        callId: "c1",
+        arguments: JSON.stringify({ command: "ls" }),
+      }),
+      "t0",
+    );
+    expect(
+      parser.parseLine(
+        eventLine("tool/result", {
+          turn: 1,
+          step: 1,
+          message: {
+            role: "user",
+            content: [{
+              type: "tool-result",
+              toolCallId: "c1",
+              content: [{ type: "text", text: "ok" }],
+              isError: false,
+            }],
+          },
+        }),
+        "t1",
+      ),
+    ).toEqual([{ kind: "tool_result", ts: "t1", toolUseId: "c1", toolName: "bash", content: "ok", isError: false }]);
+  });
 });

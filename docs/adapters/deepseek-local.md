@@ -57,6 +57,6 @@ Desired Paperclip skills are copied into `$PAPERCLIP_HOME/adapter-state/<company
 
 `deepseek_local` is a remote-managed adapter (local, SSH, and sandbox). Execution targets only accept one-shot stdin, so Paperclip uploads a one-shot JSON-RPC bridge plus the shipped Cordis file, skill root, and session root. The bridge owns the duplex `initialize` / `session/prompt` / idle interval on the target and prints `paperclipDeepseek` JSONL plus a final `bridge-result`.
 
-`getRuntimeCommandSpec.installCommand` is `null`. The remote host must already have `dsh-jsonrpc-agent` (or `adapterConfig.command`) and a harness install that can resolve `@deepseek-ai/dsh-*` plugins. Workspace restore runs in `finally` and never `git push`.
+`getRuntimeCommandSpec.installCommand` is `null`. The remote host must already have `dsh-jsonrpc-agent` (or `adapterConfig.command`) and a harness install that can resolve `@deepseek-ai/dsh-*` plugins. Workspace restore runs in `finally` and never `git push`. After each remote turn the bridge writes `.paperclip-session-export.json` so Paperclip can copy session files back onto the host `DSH_SESSION_ROOT`.
 
 Local Linux hosts can also set `filesystemScope=workspace` and/or `networkScope=deny|allowlist` to wrap the JSON-RPC runtime with the same `bwrap` confinement other local adapters use.

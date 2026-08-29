@@ -71,7 +71,11 @@ function addUsage(
   };
 }
 
-function toolResultCard(data: Record<string, unknown>, ts: string): Record<string, unknown> | null {
+function toolResultCard(
+  data: Record<string, unknown>,
+  ts: string,
+  state: ParserState | null,
+): Record<string, unknown> | null {
   const message = asRecord(data.message);
   const blocks = message?.content;
   const first = Array.isArray(blocks) ? asRecord(blocks[0]) : null;
@@ -87,7 +91,7 @@ function toolResultCard(data: Record<string, unknown>, ts: string): Record<strin
     kind: "tool_result",
     ts,
     toolUseId,
-    toolName: asString(data.name, "tool"),
+    toolName: asString(data.name, state?.toolNames[toolUseId] || "tool"),
     content,
     isError,
   };
@@ -113,6 +117,7 @@ type ParserState = {
   sawMessageUsage: boolean;
   streamedText: boolean;
   streamedThinking: boolean;
+  toolNames: Record<string, string>;
 };
 
 function emptyUsage() {
@@ -126,6 +131,7 @@ function emptyState(): ParserState {
     sawMessageUsage: false,
     streamedText: false,
     streamedThinking: false,
+    toolNames: {},
   };
 }
 
@@ -212,17 +218,20 @@ function parseProtocolLine(line: string, ts: string, state: ParserState | null):
   }
 
   if (type === "tool/call") {
+    const toolUseId = asString(data.callId, asString(data.id));
+    const name = asString(data.name, "tool");
+    if (state && toolUseId) state.toolNames[toolUseId] = name;
     return [{
       kind: "tool_call",
       ts,
-      name: asString(data.name, "tool"),
+      name,
       input: parseToolArguments(data.arguments),
-      toolUseId: asString(data.callId, asString(data.id)),
+      toolUseId,
     }];
   }
 
   if (type === "tool/result") {
-    const card = toolResultCard(data, ts);
+    const card = toolResultCard(data, ts, state);
     return card ? [card] : [];
   }
 

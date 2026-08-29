@@ -30,17 +30,22 @@ export async function materializeDeepseekSkills(input: {
   config: Record<string, unknown>;
   destDir: string;
 }): Promise<number> {
+  const destDir = path.resolve(input.destDir);
+  const root = path.parse(destDir).root;
+  if (!path.isAbsolute(destDir) || destDir === root) {
+    throw new Error(`DeepSeek skill destDir must be a non-root absolute path: ${input.destDir}`);
+  }
   const availableEntries = await readPaperclipRuntimeSkillEntries(input.config, moduleDir);
   const desired = new Set(resolvePaperclipDesiredSkillNames(input.config, availableEntries));
-  await fs.mkdir(input.destDir, { recursive: true });
-  const existing = await fs.readdir(input.destDir, { withFileTypes: true });
+  await fs.mkdir(destDir, { recursive: true });
+  const existing = await fs.readdir(destDir, { withFileTypes: true });
   await Promise.all(
-    existing.map((entry) => fs.rm(path.join(input.destDir, entry.name), { recursive: true, force: true })),
+    existing.map((entry) => fs.rm(path.join(destDir, entry.name), { recursive: true, force: true })),
   );
   let count = 0;
   for (const entry of availableEntries) {
     if (!desired.has(entry.key)) continue;
-    await materializePaperclipSkillCopy(entry.source, path.join(input.destDir, entry.runtimeName));
+    await materializePaperclipSkillCopy(entry.source, path.join(destDir, entry.runtimeName));
     count += 1;
   }
   return count;
