@@ -7,7 +7,7 @@ import {
   adapterExecutionTargetSessionIdentity,
   adapterExecutionTargetUsesManagedHome,
   adapterExecutionTargetUsesPaperclipBridge,
-  adapterExecutionTargetDuplexTelemetryRecorder,
+  adapterExecutionTargetDuplexObservabilityRecorder,
   adapterExecutionTargetEnablesSandboxDuplexBridge,
   describeAdapterExecutionTarget,
   ensureAdapterExecutionTargetCommandResolvable,
@@ -150,7 +150,7 @@ export async function executeRemote(input: {
         runId,
         target: runtimeExecutionTarget,
         enableSandboxDuplexBridge: adapterExecutionTargetEnablesSandboxDuplexBridge(runtimeExecutionTarget),
-        duplexTelemetryRecorder: adapterExecutionTargetDuplexTelemetryRecorder(runtimeExecutionTarget),
+        duplexObservabilityRecorder: adapterExecutionTargetDuplexObservabilityRecorder(runtimeExecutionTarget),
         runtimeRootDir: prepared.runtimeRootDir,
         adapterKey: "deepseek",
         timeoutSec: setup.timeoutSec,
@@ -181,6 +181,10 @@ export async function executeRemote(input: {
       runtimeExecutionTarget,
       setup.cwd,
       runtimeEnv,
+      {
+        installCommand: ctx.runtimeCommandSpec?.installCommand ?? null,
+        timeoutSec: setup.timeoutSec,
+      },
     );
     const resolvedCommand = await resolveAdapterExecutionTargetCommandForLogs(
       setup.command,

@@ -266,6 +266,7 @@ describe("resolveEnvironmentExecutionTarget", () => {
       "gemini_local",
       "grok_local",
       "kimi_local",
+      "deepseek_local",
       "opencode_local",
       "pi_local",
     ]) {

@@ -11,6 +11,7 @@ describe("createServerAdapter", () => {
     expect(adapter.requiresMaterializedRuntimeSkills).toBe(true);
     expect(adapter.sessionCodec).toBeDefined();
     expect(adapter.getRuntimeCommandSpec?.({})?.installCommand).toBeNull();
+    expect(adapter.runtimeToolDelivery).toBe("environment");
     expect(adapter.loginCapability).toBeUndefined();
     expect(adapter.acp).toBeUndefined();
     expect(adapter.listSkills).toBeTypeOf("function");

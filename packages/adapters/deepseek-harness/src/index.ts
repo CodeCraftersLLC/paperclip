@@ -112,6 +112,7 @@ SSH and sandbox targets run a one-shot JSON-RPC bridge because execution-target 
 export function createServerAdapter(): ServerAdapterModule {
   return {
     type,
+    runtimeToolDelivery: "environment",
     execute,
     testEnvironment,
     sessionCodec,
