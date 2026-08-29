@@ -76,7 +76,31 @@ describe("execute", () => {
       sessionId: result.sessionId,
       cwd: ctx.config.cwd,
     });
-    expect(typeof result.sessionParams?.sessionRoot).toBe("string");
+    expect(result.sessionParams?.sessionRoot).toBe(
+      path.join(String(process.env.PAPERCLIP_HOME), "adapter-state", "company-1", "agent-1", "deepseek", "sessions"),
+    );
+  });
+
+  it("ignores a stale idle notification before inbox receipt", async () => {
+    const ctx = await makeCtx({
+      extra: { env: { DEEPSEEK_API_KEY: "test-key", DSH_MOCK_MODE: "idle-before-inbox" } },
+    });
+    const result = await execute(ctx);
+    expect(result.exitCode).toBe(0);
+    expect(result.usage).toEqual({ inputTokens: 22, outputTokens: 8, cachedInputTokens: 4 });
+    expect(result.summary).toMatch(/^ack /);
+  });
+
+  it("rejects remote execution targets in Phase 1/2", async () => {
+    const ctx = await makeCtx();
+    ctx.executionTarget = {
+      kind: "remote",
+      transport: "sandbox",
+      remoteCwd: "/remote/workspace",
+    } as AdapterExecutionContext["executionTarget"];
+    const result = await execute(ctx);
+    expect(result.errorCode).toBe("remote_not_implemented");
+    expect(result.exitCode).toBe(1);
   });
 
   it("resumes the same sessionId on a second heartbeat", async () => {

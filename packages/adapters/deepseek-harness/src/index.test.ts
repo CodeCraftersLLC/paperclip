@@ -13,5 +13,7 @@ describe("createServerAdapter", () => {
     expect(adapter.getRuntimeCommandSpec?.({})?.installCommand).toBeNull();
     expect(adapter.loginCapability).toBeUndefined();
     expect(adapter.acp).toBeUndefined();
+    expect(adapter.listSkills).toBeTypeOf("function");
+    expect(adapter.detectModel).toBeTypeOf("function");
   });
 });

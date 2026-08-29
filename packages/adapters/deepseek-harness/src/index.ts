@@ -5,7 +5,17 @@ import type {
   ServerAdapterModule,
 } from "@paperclipai/adapter-utils";
 import { ADAPTER_LABEL, ADAPTER_TYPE, DEFAULT_MODEL, DSH_COMPAT_VERSION } from "./shared/constants.js";
-import { execute, getConfigSchema, sessionCodec, testEnvironment } from "./server/index.js";
+import {
+  detectModel,
+  execute,
+  getConfigSchema,
+  listDeepseekModels,
+  listDeepseekSkills,
+  refreshDeepseekModels,
+  sessionCodec,
+  syncDeepseekSkills,
+  testEnvironment,
+} from "./server/index.js";
 import { resolveDeepseekCommand } from "./server/runtime-config.js";
 
 export const type = ADAPTER_TYPE;
@@ -106,6 +116,11 @@ export function createServerAdapter(): ServerAdapterModule {
     sessionManagement,
     models,
     modelProfiles,
+    listModels: listDeepseekModels,
+    refreshModels: refreshDeepseekModels,
+    listSkills: listDeepseekSkills,
+    syncSkills: syncDeepseekSkills,
+    detectModel,
     supportsLocalAgentJwt: true,
     supportsInstructionsBundle: true,
     instructionsPathKey: "instructionsFilePath",

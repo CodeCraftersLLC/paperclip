@@ -466,3 +466,11 @@ Shipped `@paperclipai/adapter-deepseek-harness` and registered `deepseek_local` 
 - Host lists updated for hire/wake/session resume (not remote-managed; that is Phase 3).
 - Env test fails closed without `DEEPSEEK_API_KEY`. Hello probe is local-only.
 - Tests use a protocol-accurate mock runtime. Live `DEEPSEEK_API_KEY` heartbeat was not run.
+
+## 20. Phase 2 results (2026-08-29)
+
+- UI parser + CLI formatter map `paperclipDeepseek` JSONL to tool cards, thinking, assistant text, and result.
+- `listSkills` / `syncSkills` materialize desired Paperclip skills into `$PAPERCLIP_HOME/adapter-state/.../deepseek/skills` and set `DSH_BUNDLED_SKILL_DIR`.
+- Curated models + cheap profile + `detectModel` (`DSH_MODEL` or `~/.dsh/config.yaml`).
+- Docs: `docs/adapters/deepseek-local.md` and overview table row.
+- Phase 1 review must-fixes: transport death rejects waiters; initialize is bounded; idle-before-inbox is tested.

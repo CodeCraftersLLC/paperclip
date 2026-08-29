@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import {
   adapterExecutionTargetIsRemote,
@@ -43,6 +42,7 @@ import {
   promptAndWait,
   spawnDeepseekRuntime,
 } from "./jsonrpc-runtime.js";
+import { materializeDeepseekSkills, resolveDeepseekSkillsDir } from "./skills.js";
 import type { JsonRpcNotification } from "./jsonrpc-client.js";
 
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
@@ -90,6 +90,12 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     sessionRoot: asString(config.sessionRoot, ""),
   });
   await fs.mkdir(sessionRoot, { recursive: true });
+  const skillsDir = resolveDeepseekSkillsDir({ companyId: agent.companyId, agentId: agent.id });
+  const stagedSkills = await materializeDeepseekSkills({ config, destDir: skillsDir });
+  if (stagedSkills > 0) {
+    env.DSH_BUNDLED_SKILL_DIR = skillsDir;
+    await onLog("stdout", `[paperclip] Materialized ${stagedSkills} DeepSeek skill(s) into ${skillsDir}\n`);
+  }
 
   const command = resolveDeepseekCommand(config, env);
   const harnessRoot = resolveHarnessRoot(config, env);

@@ -34,7 +34,7 @@
     persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a coding agent.'
     workspaceContext: false
     skills:
-      enabled: false
+      enabled: true
     toolBash:
       enableRunInBackground: false
     toolJobs: false
@@ -78,6 +78,18 @@
 
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
+
+- id: skills
+  name: '@deepseek-ai/dsh-skill'
+
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    customSkillDirs: !!js process.env.DSH_BUNDLED_SKILL_DIR ? [process.env.DSH_BUNDLED_SKILL_DIR] : []
+    watch: false
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
 
 - id: token-meter
   name: '@deepseek-ai/dsh-token-meter'

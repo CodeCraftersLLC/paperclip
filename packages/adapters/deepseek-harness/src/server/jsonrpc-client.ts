@@ -26,9 +26,14 @@ export class JsonRpcResponseError extends Error {
   }
 }
 
+type NotificationWaiter = {
+  resolve: (notification: JsonRpcNotification) => void;
+  reject: (error: Error) => void;
+};
+
 export class NotificationSubscription {
   private readonly queue: JsonRpcNotification[] = [];
-  private readonly waiters: Array<(notification: JsonRpcNotification) => void> = [];
+  private readonly waiters: NotificationWaiter[] = [];
   private failure: Error | null = null;
   private closed = false;
 
@@ -41,13 +46,14 @@ export class NotificationSubscription {
     if (this.closed || this.failure) return;
     if (this.filter && !this.filter(notification)) return;
     const waiter = this.waiters.shift();
-    if (waiter) waiter(notification);
+    if (waiter) waiter.resolve(notification);
     else this.queue.push(notification);
   }
 
   fail(error: Error) {
     if (this.failure || this.closed) return;
     this.failure = error;
+    for (const waiter of this.waiters) waiter.reject(error);
     this.waiters.length = 0;
   }
 
@@ -70,7 +76,7 @@ export class NotificationSubscription {
         reject(this.failure);
         return;
       }
-      this.waiters.push(resolve);
+      this.waiters.push({ resolve, reject });
     });
   }
 }
@@ -89,6 +95,16 @@ export class JsonRpcNdjsonClient {
   ) {
     this.readline = createInterface({ input: stdout });
     this.readline.on("line", (line) => this.onLine(line));
+    this.readline.on("close", () => {
+      this.failTransport(new Error("DeepSeek Harness JSON-RPC stdout closed"));
+    });
+  }
+
+  failTransport(error: Error) {
+    if (this.closed) return;
+    for (const waiter of this.pending.values()) waiter.reject(error);
+    this.pending.clear();
+    for (const subscription of this.subscriptions) subscription.fail(error);
   }
 
   request(method: string, params?: unknown): Promise<unknown> {

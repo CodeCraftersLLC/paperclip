@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { DSH_SERVER_INFO_NAME } from "../shared/constants.js";
 import { JsonRpcNdjsonClient, JsonRpcResponseError } from "./jsonrpc-client.js";
 import {
   PROTOCOL_METHODS,
@@ -48,6 +49,13 @@ export async function spawnDeepseekRuntime(input: {
   });
 
   const client = new JsonRpcNdjsonClient(child.stdin, child.stdout);
+  child.on("error", (error) => {
+    client.failTransport(error);
+  });
+  child.on("exit", (code, signal) => {
+    if (code === 0 || signal === "SIGTERM" || signal === "SIGKILL") return;
+    client.failTransport(new Error(`DeepSeek Harness runtime exited (${code ?? signal ?? "unknown"})`));
+  });
 
   const close = async (graceMs: number) => {
     try {
@@ -80,11 +88,16 @@ export async function spawnDeepseekRuntime(input: {
 export async function initializeRuntime(
   client: JsonRpcNdjsonClient,
   params: InitializeParams,
+  timeoutMs = 15_000,
 ): Promise<void> {
-  const result = await client.request(PROTOCOL_METHODS.initialize, params);
+  const result = await withTimeout(
+    client.request(PROTOCOL_METHODS.initialize, params),
+    timeoutMs,
+    "initialize timed out",
+  );
   if (!isRecord(result)) return;
   const serverInfo = isRecord(result.serverInfo) ? result.serverInfo : null;
-  if (serverInfo && typeof serverInfo.name === "string" && serverInfo.name !== "deepseek-harness-sdk-runtime") {
+  if (serverInfo && typeof serverInfo.name === "string" && serverInfo.name !== DSH_SERVER_INFO_NAME) {
     throw new Error(`Unexpected DeepSeek JSON-RPC serverInfo.name: ${serverInfo.name}`);
   }
 }
@@ -134,6 +147,20 @@ function readMessageId(result: unknown): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function waitForExit(

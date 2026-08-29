@@ -11,7 +11,7 @@ import {
   ensureAdapterExecutionTargetCommandResolvable,
   readAdapterExecutionTarget,
 } from "@paperclipai/adapter-utils/execution-target";
-import { asNumber, asString, parseObject } from "@paperclipai/adapter-utils/server-utils";
+import { asNumber, asString, ensureAbsoluteDirectory, parseObject } from "@paperclipai/adapter-utils/server-utils";
 import { ADAPTER_TYPE, DEFAULT_HELLO_PROBE_TIMEOUT_SEC } from "../shared/constants.js";
 import {
   resolveCordisConfigPath,
@@ -83,7 +83,10 @@ export async function testEnvironment(
   }
 
   try {
-    await fs.mkdir(cwd, { recursive: true });
+    if (!path.isAbsolute(cwd)) {
+      throw new Error(`Working directory must be absolute: ${cwd}`);
+    }
+    await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
     checks.push({
       code: "cwd",
       level: "info",
