@@ -35,6 +35,44 @@ describe("deepseek skills", () => {
     expect(copied).toContain("name: demo-skill");
   });
 
+  it("rewrites the materialized root and deletes deselected siblings", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dsh-skills-"));
+    tempDirs.push(root);
+    const keep = path.join(root, "source", "keep-skill");
+    const drop = path.join(root, "source", "drop-skill");
+    for (const source of [keep, drop]) {
+      await fs.mkdir(source, { recursive: true });
+      await fs.writeFile(
+        path.join(source, "SKILL.md"),
+        `---\nname: ${path.basename(source)}\ndescription: Demo\n---\n\nHello.\n`,
+      );
+    }
+    const dest = path.join(root, "dest");
+    await materializeDeepseekSkills({
+      config: {
+        paperclipRuntimeSkills: [
+          { key: "keep-skill", runtimeName: "keep-skill", source: keep },
+          { key: "drop-skill", runtimeName: "drop-skill", source: drop },
+        ],
+        paperclipSkillSync: { desiredSkills: ["keep-skill", "drop-skill"] },
+      },
+      destDir: dest,
+    });
+    const afterDrop = await materializeDeepseekSkills({
+      config: {
+        paperclipRuntimeSkills: [
+          { key: "keep-skill", runtimeName: "keep-skill", source: keep },
+          { key: "drop-skill", runtimeName: "drop-skill", source: drop },
+        ],
+        paperclipSkillSync: { desiredSkills: ["keep-skill"] },
+      },
+      destDir: dest,
+    });
+    expect(afterDrop).toBe(1);
+    await expect(fs.stat(path.join(dest, "keep-skill", "SKILL.md"))).resolves.toBeDefined();
+    await expect(fs.stat(path.join(dest, "drop-skill"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("lists Paperclip-managed skills as ephemeral", async () => {
     const snapshot = await listDeepseekSkills({
       agentId: "agent-1",

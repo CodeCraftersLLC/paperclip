@@ -125,6 +125,20 @@ describe("execute", () => {
     expect(second.sessionId).not.toBe(first.sessionId);
   });
 
+  it("appends HEARTBEAT/SOUL path directives to DSH_SYSTEM_PROMPT", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "dsh-exec-"));
+    tempDirs.push(cwd);
+    const instructions = path.join(cwd, "SOUL.md");
+    await fs.writeFile(instructions, "You are the company soul.\n", "utf8");
+    const ctx = await makeCtx({
+      cwd,
+      extra: { instructionsFilePath: instructions },
+    });
+    const result = await execute(ctx);
+    expect(result.exitCode).toBe(0);
+    expect(ctx.logs.join("")).not.toMatch(/instructions file was missing/);
+  });
+
   it("retries with clearSession when the runtime rejects the session", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "dsh-exec-"));
     tempDirs.push(cwd);

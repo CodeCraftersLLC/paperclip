@@ -38,7 +38,102 @@ function thinkingFromBlocks(content: unknown): string {
     .join("");
 }
 
-export function parseStdoutLine(line: string, ts: string): Array<Record<string, unknown>> {
+function parseToolArguments(value: unknown): unknown {
+  if (typeof value === "string") {
+    const parsed = safeJsonParse(value);
+    return parsed ?? value;
+  }
+  return value ?? {};
+}
+
+function tokenCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function usageFromRecord(value: unknown): { inputTokens: number; outputTokens: number; cachedTokens: number } | null {
+  const usage = asRecord(value);
+  if (!usage) return null;
+  return {
+    inputTokens: tokenCount(usage.inputTokens),
+    outputTokens: tokenCount(usage.outputTokens),
+    cachedTokens: tokenCount(usage.cacheReadTokens),
+  };
+}
+
+function addUsage(
+  left: { inputTokens: number; outputTokens: number; cachedTokens: number },
+  right: { inputTokens: number; outputTokens: number; cachedTokens: number },
+) {
+  return {
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    cachedTokens: left.cachedTokens + right.cachedTokens,
+  };
+}
+
+function toolResultCard(data: Record<string, unknown>, ts: string): Record<string, unknown> | null {
+  const message = asRecord(data.message);
+  const blocks = message?.content;
+  const first = Array.isArray(blocks) ? asRecord(blocks[0]) : null;
+  const toolUseId = asString(first?.toolCallId, asString(data.callId, asString(data.id)));
+  if (!toolUseId) return null;
+  const inner = first?.content;
+  let content = "";
+  if (typeof inner === "string") content = inner;
+  else if (Array.isArray(inner)) content = textFromBlocks(inner);
+  else if (inner != null) content = JSON.stringify(inner);
+  const isError = first?.isError === true || Boolean(data.error);
+  return {
+    kind: "tool_result",
+    ts,
+    toolUseId,
+    toolName: asString(data.name, "tool"),
+    content,
+    isError,
+  };
+}
+
+function turnEndStderr(data: Record<string, unknown>, ts: string): Record<string, unknown> | null {
+  const reason = asRecord(data.reason);
+  const kind = asString(reason?.kind);
+  if (kind === "error") {
+    const error = asRecord(reason?.error);
+    const text = asString(error?.message) || asString(error?.code) || "DeepSeek Harness turn ended with an error";
+    return { kind: "stderr", ts, text };
+  }
+  if (kind === "max-tokens") {
+    return { kind: "stderr", ts, text: "DeepSeek Harness turn ended: max-tokens" };
+  }
+  return null;
+}
+
+type ParserState = {
+  messageUsage: { inputTokens: number; outputTokens: number; cachedTokens: number };
+  chunkUsage: { inputTokens: number; outputTokens: number; cachedTokens: number };
+  sawMessageUsage: boolean;
+  streamedText: boolean;
+  streamedThinking: boolean;
+};
+
+function emptyUsage() {
+  return { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+}
+
+function emptyState(): ParserState {
+  return {
+    messageUsage: emptyUsage(),
+    chunkUsage: emptyUsage(),
+    sawMessageUsage: false,
+    streamedText: false,
+    streamedThinking: false,
+  };
+}
+
+function resultUsage(state: ParserState) {
+  return state.sawMessageUsage ? state.messageUsage : state.chunkUsage;
+}
+
+function parseProtocolLine(line: string, ts: string, state: ParserState | null): Array<Record<string, unknown>> {
   const trimmed = String(line ?? "").trim();
   if (!trimmed) return [];
   const parsed = asRecord(safeJsonParse(trimmed));
@@ -56,13 +151,14 @@ export function parseStdoutLine(line: string, ts: string): Array<Record<string, 
     return [{ kind: "system", ts, text: `Subagent finished ${asString(params.childSessionId)}`.trim() }];
   }
   if (method === "session.status" && params.status === "idle") {
+    if (!state) return [];
     return [{
       kind: "result",
       ts,
       text: "Run completed",
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedTokens: 0,
+      inputTokens: resultUsage(state).inputTokens,
+      outputTokens: resultUsage(state).outputTokens,
+      cachedTokens: resultUsage(state).cachedTokens,
       costUsd: 0,
       subtype: "end",
       isError: false,
@@ -79,24 +175,39 @@ export function parseStdoutLine(line: string, ts: string): Array<Record<string, 
   const data = asRecord(event.data) ?? {};
 
   if (type === "assistant/chunk") {
-    const block = asRecord(data.block) ?? data;
-    const blockType = asString(block.type, "text");
-    const text = asString(block.text, asString(data.text));
+    const chunk = asRecord(data.chunk) ?? {};
+    const chunkType = asString(chunk.type);
+    if (chunkType === "usage") {
+      const usage = usageFromRecord(chunk.usage);
+      if (usage && state) state.chunkUsage = addUsage(state.chunkUsage, usage);
+      return [];
+    }
+    const text = asString(chunk.text);
     if (!text) return [];
-    if (blockType === "reasoning" || blockType === "thinking") {
+    if (chunkType === "reasoning-delta") {
+      if (state) state.streamedThinking = true;
       return [{ kind: "thinking", ts, text, delta: true }];
     }
-    return [{ kind: "assistant", ts, text, delta: true }];
+    if (chunkType === "text-delta") {
+      if (state) state.streamedText = true;
+      return [{ kind: "assistant", ts, text, delta: true }];
+    }
+    return [];
   }
 
   if (type === "assistant/message") {
-    const message = asRecord(data.message) ?? data;
+    const message = asRecord(data.message) ?? {};
     const content = message.content;
+    const usage = usageFromRecord(data.usage);
+    if (usage && state) {
+      state.messageUsage = addUsage(state.messageUsage, usage);
+      state.sawMessageUsage = true;
+    }
     const entries: Array<Record<string, unknown>> = [];
     const thinking = thinkingFromBlocks(content);
     const text = textFromBlocks(content);
-    if (thinking) entries.push({ kind: "thinking", ts, text: thinking });
-    if (text) entries.push({ kind: "assistant", ts, text });
+    if (thinking && !state?.streamedThinking) entries.push({ kind: "thinking", ts, text: thinking });
+    if (text && !state?.streamedText) entries.push({ kind: "assistant", ts, text });
     return entries;
   }
 
@@ -105,21 +216,14 @@ export function parseStdoutLine(line: string, ts: string): Array<Record<string, 
       kind: "tool_call",
       ts,
       name: asString(data.name, "tool"),
-      input: data.arguments ?? data.input ?? {},
+      input: parseToolArguments(data.arguments),
       toolUseId: asString(data.callId, asString(data.id)),
     }];
   }
 
   if (type === "tool/result") {
-    const content = typeof data.content === "string" ? data.content : JSON.stringify(data.content ?? data);
-    return [{
-      kind: "tool_result",
-      ts,
-      toolUseId: asString(data.callId, asString(data.id, "tool")),
-      toolName: asString(data.name, "tool"),
-      content,
-      isError: data.isError === true || data.ok === false,
-    }];
+    const card = toolResultCard(data, ts);
+    return card ? [card] : [];
   }
 
   if (type === "user/message") {
@@ -130,12 +234,25 @@ export function parseStdoutLine(line: string, ts: string): Array<Record<string, 
   }
 
   if (type === "turn/end") {
-    const reason = asString(data.reason);
-    const error = asString(data.error);
-    if (reason === "error" || error) {
-      return [{ kind: "stderr", ts, text: error || reason || "DeepSeek turn ended with an error" }];
-    }
+    const stderr = turnEndStderr(data, ts);
+    return stderr ? [stderr] : [];
   }
 
   return [];
+}
+
+export function createStdoutParser() {
+  let state = emptyState();
+  return {
+    parseLine(line: string, ts: string): Array<Record<string, unknown>> {
+      return parseProtocolLine(line, ts, state);
+    },
+    reset() {
+      state = emptyState();
+    },
+  };
+}
+
+export function parseStdoutLine(line: string, ts: string): Array<Record<string, unknown>> {
+  return createStdoutParser().parseLine(line, ts);
 }

@@ -33,7 +33,16 @@ function emitTurn(sessionId, messageId) {
   });
   notify("session.event", {
     sessionId,
-    event: { type: "tool/call", data: { name: "bash", callId: `call-${messageId}` } },
+    event: {
+      type: "tool/call",
+      data: {
+        turn: 1,
+        step: 1,
+        name: "bash",
+        callId: `call-${messageId}`,
+        arguments: JSON.stringify({ command: "true" }),
+      },
+    },
   });
   notify("session.event", {
     sessionId,

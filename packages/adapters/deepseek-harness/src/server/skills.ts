@@ -33,6 +33,10 @@ export async function materializeDeepseekSkills(input: {
   const availableEntries = await readPaperclipRuntimeSkillEntries(input.config, moduleDir);
   const desired = new Set(resolvePaperclipDesiredSkillNames(input.config, availableEntries));
   await fs.mkdir(input.destDir, { recursive: true });
+  const existing = await fs.readdir(input.destDir, { withFileTypes: true });
+  await Promise.all(
+    existing.map((entry) => fs.rm(path.join(input.destDir, entry.name), { recursive: true, force: true })),
+  );
   let count = 0;
   for (const entry of availableEntries) {
     if (!desired.has(entry.key)) continue;

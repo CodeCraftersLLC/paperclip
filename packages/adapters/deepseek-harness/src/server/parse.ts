@@ -3,7 +3,9 @@ import {
   addUsage,
   classifyDeepseekError,
   extractAssistantText,
+  extractChunkUsage,
   extractEventUsage,
+  extractTurnEndError,
   isRecord,
   isUnknownSessionError,
 } from "./protocol.js";
@@ -23,6 +25,8 @@ const EMPTY_USAGE: UsageSummary = { inputTokens: 0, outputTokens: 0, cachedInput
 
 export function parseTurnNotifications(notifications: JsonRpcNotification[]): DeepseekTurnParse {
   let usage = EMPTY_USAGE;
+  let chunkUsage = EMPTY_USAGE;
+  let sawMessageUsage = false;
   let summary: string | null = null;
   let toolName: string | null = null;
   let errorMessage: string | null = null;
@@ -33,7 +37,12 @@ export function parseTurnNotifications(notifications: JsonRpcNotification[]): De
     if (!isRecord(event)) continue;
 
     const eventUsage = extractEventUsage(event);
-    if (eventUsage) usage = addUsage(usage, eventUsage);
+    if (eventUsage) {
+      usage = addUsage(usage, eventUsage);
+      sawMessageUsage = true;
+    }
+    const streamedUsage = extractChunkUsage(event);
+    if (streamedUsage) chunkUsage = addUsage(chunkUsage, streamedUsage);
 
     const assistantText = extractAssistantText(event);
     if (assistantText) summary = assistantText;
@@ -42,17 +51,12 @@ export function parseTurnNotifications(notifications: JsonRpcNotification[]): De
       toolName = event.data.name;
     }
 
-    if (event.type === "turn/end" && isRecord(event.data)) {
-      const reason = typeof event.data.reason === "string" ? event.data.reason : "";
-      const error = typeof event.data.error === "string" ? event.data.error : "";
-      if (reason === "error" || error) {
-        errorMessage = error || reason || "DeepSeek Harness turn ended with an error";
-      }
-    }
+    const turnError = extractTurnEndError(event);
+    if (turnError) errorMessage = turnError;
   }
 
   return {
-    usage,
+    usage: sawMessageUsage ? usage : chunkUsage,
     summary,
     toolName,
     errorMessage,

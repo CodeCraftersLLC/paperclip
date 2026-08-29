@@ -474,3 +474,14 @@ Shipped `@paperclipai/adapter-deepseek-harness` and registered `deepseek_local` 
 - Curated models + cheap profile + `detectModel` (`DSH_MODEL` or `~/.dsh/config.yaml`).
 - Docs: `docs/adapters/deepseek-local.md` and overview table row.
 - Phase 1 review must-fixes: transport death rejects waiters; initialize is bounded; idle-before-inbox is tested.
+
+### Phase 2 review follow-up (official wire)
+
+Parser and turn accounting now match dsh `0.1.1-rc.2` `SessionEventMap` / `StreamChunk` / `ToolResultMessage`:
+
+- `assistant/chunk.data.chunk` is `text-delta` / `reasoning-delta` / `usage` (not a invented `{ type, text }` block).
+- `tool/call.arguments` is a JSON string; `tool/result` content is `data.message.content[0]` (`type: tool-result`, `toolCallId`).
+- `turn/end.reason` is `{ kind, error? }` (`LlmFailure`), including `max-tokens`.
+- `createStdoutParser` accumulates usage; idle result uses `assistant/message.usage` when present and falls back to chunk usage so the run-viewer card is not hardcoded zeros. Message and chunk usage are not double-counted.
+- `materializeDeepseekSkills` rewrites the materialized root (deselected siblings are deleted).
+- Instructions append the Claude-equivalent HEARTBEAT.md / SOUL.md path directive.

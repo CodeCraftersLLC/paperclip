@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import {
   adapterExecutionTargetIsRemote,
@@ -116,7 +117,13 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const instructionsFilePath = asString(config.instructionsFilePath, "").trim();
   if (instructionsFilePath) {
     try {
-      env.DSH_SYSTEM_PROMPT = await fs.readFile(instructionsFilePath, "utf8");
+      const instructionsContent = await fs.readFile(instructionsFilePath, "utf8");
+      const instructionsFileDir = path.dirname(path.resolve(instructionsFilePath));
+      env.DSH_SYSTEM_PROMPT =
+        `${instructionsContent}\nThe above agent instructions were loaded from ${instructionsFilePath}. ` +
+        `Resolve any relative file references from ${instructionsFileDir}. ` +
+        `This base directory is authoritative for sibling instruction files such as ` +
+        `./HEARTBEAT.md, ./SOUL.md, and ./TOOLS.md; do not resolve those from the parent agent directory.`;
     } catch {
       await onLog(
         "stderr",

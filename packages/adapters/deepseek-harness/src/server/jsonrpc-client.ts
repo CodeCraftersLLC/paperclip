@@ -58,7 +58,11 @@ export class NotificationSubscription {
   }
 
   close() {
+    if (this.closed) return;
     this.closed = true;
+    const error = new Error("JSON-RPC subscription closed");
+    for (const waiter of this.waiters) waiter.reject(error);
+    this.waiters.length = 0;
     this.onClose();
   }
 
@@ -102,6 +106,8 @@ export class JsonRpcNdjsonClient {
 
   failTransport(error: Error) {
     if (this.closed) return;
+    this.closed = true;
+    this.readline.close();
     for (const waiter of this.pending.values()) waiter.reject(error);
     this.pending.clear();
     for (const subscription of this.subscriptions) subscription.fail(error);

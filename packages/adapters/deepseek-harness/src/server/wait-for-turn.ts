@@ -77,14 +77,16 @@ async function nextWithTimeout(
   if (queued) return queued;
 
   let timer: NodeJS.Timeout | undefined;
+  const nextPromise = subscription.next();
   try {
     return await Promise.race([
-      subscription.next(),
+      nextPromise,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(timeoutMessageText)), timeoutMs);
       }),
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+    void nextPromise.catch(() => {});
   }
 }

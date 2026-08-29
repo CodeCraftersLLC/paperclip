@@ -160,6 +160,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, message: string):
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+    void promise.catch(() => {});
   }
 }
 

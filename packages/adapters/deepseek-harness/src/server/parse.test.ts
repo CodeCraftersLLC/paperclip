@@ -45,17 +45,44 @@ describe("parseTurnNotifications", () => {
     expect(parsed.usage).toEqual({ inputTokens: 10, outputTokens: 2, cachedInputTokens: 1 });
   });
 
-  it("maps turn/end errors and unknown sessions", () => {
+  it("maps official turn/end LlmFailure and unknown sessions", () => {
     const parsed = parseTurnNotifications([
       {
         method: "session.event",
         params: {
           sessionId: "s1",
-          event: { type: "turn/end", data: { reason: "error", error: "unknown session abc" } },
+          event: {
+            type: "turn/end",
+            data: { turn: 1, reason: { kind: "error", error: { message: "unknown session abc", code: "UNKNOWN" } } },
+          },
         },
       },
     ]);
     expect(parsed.unknownSession).toBe(true);
     expect(parsed.errorMessage).toMatch(/unknown session/);
+  });
+
+  it("maps max-tokens turn/end and assistant/chunk usage", () => {
+    const parsed = parseTurnNotifications([
+      {
+        method: "session.event",
+        params: {
+          sessionId: "s1",
+          event: {
+            type: "assistant/chunk",
+            data: { turn: 1, step: 1, chunk: { type: "usage", usage: { inputTokens: 3, outputTokens: 1 } } },
+          },
+        },
+      },
+      {
+        method: "session.event",
+        params: {
+          sessionId: "s1",
+          event: { type: "turn/end", data: { turn: 1, reason: { kind: "max-tokens" } } },
+        },
+      },
+    ]);
+    expect(parsed.errorMessage).toMatch(/max-tokens/);
+    expect(parsed.usage).toEqual({ inputTokens: 3, outputTokens: 1, cachedInputTokens: 0 });
   });
 });

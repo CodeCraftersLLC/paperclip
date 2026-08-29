@@ -109,10 +109,34 @@ export function extractAssistantText(event: unknown): string {
 }
 
 export function extractEventUsage(event: unknown): UsageSummary | null {
-  if (!isRecord(event) || !isRecord(event.data)) return null;
+  if (!isRecord(event) || event.type !== "assistant/message" || !isRecord(event.data)) return null;
   const usage = isRecord(event.data.usage) ? event.data.usage : null;
   if (!usage) return null;
   return mapTokenUsage(usage as TokenUsage);
+}
+
+export function extractChunkUsage(event: unknown): UsageSummary | null {
+  if (!isRecord(event) || event.type !== "assistant/chunk" || !isRecord(event.data)) return null;
+  const chunk = isRecord(event.data.chunk) ? event.data.chunk : null;
+  if (!chunk || chunk.type !== "usage" || !isRecord(chunk.usage)) return null;
+  return mapTokenUsage(chunk.usage as TokenUsage);
+}
+
+export function extractTurnEndError(event: unknown): string | null {
+  if (!isRecord(event) || event.type !== "turn/end" || !isRecord(event.data)) return null;
+  const reason = isRecord(event.data.reason) ? event.data.reason : null;
+  if (!reason) return null;
+  const kind = typeof reason.kind === "string" ? reason.kind : "";
+  if (kind === "error") {
+    const error = isRecord(reason.error) ? reason.error : null;
+    if (error && typeof error.message === "string" && error.message.trim()) return error.message;
+    if (error && typeof error.code === "string" && error.code.trim()) {
+      return `DeepSeek Harness turn ended with an error (${error.code})`;
+    }
+    return "DeepSeek Harness turn ended with an error";
+  }
+  if (kind === "max-tokens") return "DeepSeek Harness turn ended: max-tokens";
+  return null;
 }
 
 export function classifyDeepseekError(message: string): AdapterExecutionErrorFamily | null {
