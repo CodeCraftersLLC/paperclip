@@ -105,6 +105,7 @@ import {
   createHermesGatewayServerAdapter,
   createHermesLocalServerAdapter,
 } from "@paperclipai/hermes-paperclip-adapter";
+import { createServerAdapter as createDeepseekLocalServerAdapter } from "@paperclipai/adapter-deepseek-harness";
 import {
   execute as openCodeExecute,
   listOpenCodeSkills,
@@ -534,6 +535,8 @@ const hermesLocalAdapter: ServerAdapterModule = {
   runtimeToolDelivery: "environment",
 };
 
+const deepseekLocalAdapter = createDeepseekLocalServerAdapter();
+
 const openclawGatewayAdapter: ServerAdapterModule = {
   type: "openclaw_gateway",
   runtimeToolDelivery: "invocation_context",
@@ -613,6 +616,7 @@ function registerBuiltInAdapters() {
     kimiLocalAdapter,
     hermesGatewayAdapter,
     hermesLocalAdapter,
+    deepseekLocalAdapter,
     openclawGatewayAdapter,
     processAdapter,
     httpAdapter,

@@ -73,6 +73,7 @@ const REMOTE_MANAGED_ADAPTERS = new Set<AgentAdapterType>([
   "kimi_local",
   "opencode_local",
   "pi_local",
+  "deepseek_local",
 ]);
 
 export function adapterSupportsRemoteManagedEnvironments(adapterType: string): boolean {

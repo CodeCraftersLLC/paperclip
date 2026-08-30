@@ -122,6 +122,12 @@ const adapterDisplayMap: Record<string, AdapterDisplayInfo> = {
     description: "Pi harness",
     icon: Terminal,
   },
+  deepseek_local: {
+    label: "DeepSeek Harness",
+    description: "DeepSeek Harness JSON-RPC adapter",
+    icon: Sparkles,
+    experimental: true,
+  },
   cursor: {
     label: "Cursor",
     description: "Cursor CLI harness",
